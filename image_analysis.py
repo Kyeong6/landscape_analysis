@@ -69,3 +69,28 @@ def box_counting_dimension(image_path):
     plt.show()
 
     return fractal_dimension
+
+# 이미즈이 거칠기 파악
+def surface_roughness(image_path):
+    # gray scale 변환
+    image = io.imread(image_path, as_gray=True)
+    
+    # Sobel 필터 : x,y 방향의 gradient 계산
+    dx = ndimage.sobel(image, 0)  # x 방향의 derivative
+    dy = ndimage.sobel(image, 1)  # y 방향의 derivative
+    magnitude = np.hypot(dx, dy)  # gradient magnitude
+    
+    # 평균 및 표준 편차 
+    mean_roughness = np.mean(magnitude)
+    std_roughness = np.std(magnitude)
+    
+    plt.figure(figsize=(8, 6))
+    plt.imshow(magnitude, cmap='gray')
+    plt.colorbar()
+    plt.title('Image Surface Roughness')
+    plt.axis('off')
+    plt.show()
+    
+    print(f'Mean Surface Roughness: {mean_roughness}')
+    print(f'Standard Deviation of Surface Roughness: {std_roughness}')
+
