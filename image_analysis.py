@@ -70,7 +70,7 @@ def box_counting_dimension(image_path):
 
     return fractal_dimension
 
-# 이미즈이 거칠기 파악
+# 이미지의 거칠기 파악
 def surface_roughness(image_path):
     # gray scale 변환
     image = io.imread(image_path, as_gray=True)
@@ -94,3 +94,19 @@ def surface_roughness(image_path):
     print(f'Mean Surface Roughness: {mean_roughness}')
     print(f'Standard Deviation of Surface Roughness: {std_roughness}')
 
+
+# 메인 함수 설정
+def main():
+        image_path = './landscape.jpg'
+        print("Chromo_spectroscopy")
+        chromo_spectroscopy(image_path)
+
+        print("Fractal Dimension")
+        box_counting_dimension(image_path)
+
+        print("Roughness")
+        surface_roughness(image_path)
+
+# 실행
+if __name__ == '__main__':
+     main()
