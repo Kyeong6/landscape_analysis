@@ -95,6 +95,49 @@ def surface_roughness(image_path):
     print(f'Standard Deviation of Surface Roughness: {std_roughness}')
 
 
+# k-means clustering
+def kmeans_color_quantization(image_path, k=5):
+
+    img = Image.open(image_path)
+    img = img.convert('RGB')
+    img_data = np.array(img)
+    
+    # 2차원 배열로 변환 (pixel 수 x 3(RGB))
+    img_data_reshaped = img_data.reshape((-1, 3))
+    
+    # k-means clustering 적용
+    kmeans = KMeans(n_clusters=k, random_state=42)
+    kmeans.fit(img_data_reshaped)
+    
+    # 중심 색상 계산
+    centers = kmeans.cluster_centers_
+    labels = kmeans.labels_
+    
+    # 비율 계산
+    label_counts = np.bincount(labels)
+    label_ratios = label_counts / len(labels)
+    
+    # RGB to CIELAB 변환
+    centers_lab = color.rgb2lab(centers.reshape(1, -1, 3) / 255.0).reshape(-1, 3)
+    
+    # 클러스터 중심 간의 거리 계산 (CIELAB)
+    distances = np.sqrt(np.sum((centers_lab[:, np.newaxis, :] - centers_lab[np.newaxis, :, :]) ** 2, axis=2))
+    
+    # 거리 기반 가중치 계산
+    weight_matrix = np.exp(-distances / distances.max())
+    weights = weight_matrix.sum(axis=1)
+    
+    # 가중치의 평균 값 계산
+    mean_weight = np.mean(weights)
+
+    plt.figure(figsize=(8, 8))
+    plt.pie(label_ratios, labels=[f'Cluster {i+1}' for i in range(k)], colors=[centers[i]/255 for i in range(k)], startangle=90, counterclock=False)
+    plt.title('Color Distribution in Image')
+    plt.show()
+    
+    return centers, label_ratios, centers_lab, weights, mean_weight
+
+
 # 메인 함수 설정
 def main():
         image_path = './landscape.jpg'
