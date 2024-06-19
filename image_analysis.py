@@ -137,6 +137,26 @@ def kmeans_color_quantization(image_path, k=5):
     
     return centers, label_ratios, centers_lab, weights, mean_weight
 
+# 색상 양자화
+def quantize_image(image_path, bits=3):
+    image = Image.open(image_path)
+    image = image.convert('RGB')
+    image = np.array(image)
+    
+    factor = 256 // (2**bits)
+    quantized_image = (image // factor) * factor
+    
+    return quantized_image
+
+# 엔트로피 계산
+def calculate_entropy(image):
+    pixels = image.reshape(-1, image.shape[-1])
+    _, counts = np.unique(pixels, axis=0, return_counts=True)
+    probabilities = counts / counts.sum()
+    entropy = -np.sum(probabilities * np.log2(probabilities))
+    return entropy
+
+
 
 # 메인 함수 설정
 def main():
