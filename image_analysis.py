@@ -156,6 +156,12 @@ def calculate_entropy(image):
     entropy = -np.sum(probabilities * np.log2(probabilities))
     return entropy
 
+# 이미지 평탄화
+def mutual_information(image, mask_flat):
+    image_flat = image.reshape(-1, image.shape[-1])
+    image_flat = image_flat[:, 0]  # 이미지의 첫 번째 채널 사용 (흑백으로 간주)
+    mi = mutual_info_score(image_flat, mask_flat)
+    return mi
 
 
 # 메인 함수 설정
