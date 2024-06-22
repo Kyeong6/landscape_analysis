@@ -161,7 +161,36 @@ def mutual_information(image, mask_flat):
     image_flat = image.reshape(-1, image.shape[-1])
     image_flat = image_flat[:, 0]  # 이미지의 첫 번째 채널 사용 (흑백으로 간주)
     mi = mutual_info_score(image_flat, mask_flat)
-    return mi
+    return 
+
+
+# 이미지 분할
+def partition_image(image, direction='horizontal'):
+    h, w, _ = image.shape
+    max_mi = -np.inf
+    best_partition = None
+
+    if direction == 'horizontal':
+        for i in range(1, h):
+            mask = np.zeros((h, w), dtype=int)
+            mask[:i, :] = 1
+            mask_flat = mask.flatten()
+            mi = mutual_information(image, mask_flat)
+            if mi > max_mi:
+                max_mi = mi
+                best_partition = i
+    else:
+        for i in range(1, w):
+            mask = np.zeros((h, w), dtype=int)
+            mask[:, :i] = 1
+            mask_flat = mask.flatten()
+            mi = mutual_information(image, mask_flat)
+            if mi > max_mi:
+                max_mi = mi
+                best_partition = i
+                
+    return best_partition, max_mi
+
 
 
 # 메인 함수 설정
