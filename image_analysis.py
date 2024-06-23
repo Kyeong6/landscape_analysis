@@ -192,19 +192,41 @@ def partition_image(image, direction='horizontal'):
     return best_partition, max_mi
 
 
+def segment_image(image_path):
+    image = quantize_image(image_path)
+    h_partition, h_mi = partition_image(image, 'horizontal')
+    v_partition, v_mi = partition_image(image, 'vertical')
+    
+    if h_mi > v_mi:
+        print(f"Best partition: Horizontal at {h_partition}")
+    else:
+        print(f"Best partition: Vertical at {v_partition}")
+
+
 
 # 메인 함수 설정
 def main():
-        image_path = './landscape.jpg'
-        print("Chromo_spectroscopy")
-        chromo_spectroscopy(image_path)
+    image_path = './landscape.jpg'
+    print("Performing Chromo-spectroscopy...")
+    chromo_spectroscopy(image_path)
 
-        print("Fractal Dimension")
-        box_counting_dimension(image_path)
+    print("Calculating Fractal Dimension...")
+    box_counting_dimension(image_path)
 
-        print("Roughness")
-        surface_roughness(image_path)
+    print("Analyzing Surface Roughness and Brightness Contrast...")
+    surface_roughness(image_path)
 
+    print("k-mean analyze")
+    centers, label_ratios, centers_lab, weights, mean_weight = kmeans_color_quantization(image_path, 5)
+    # 클러스터 중심 색상과 비율, LAB 값, 가중치 출력
+    for i, (center, ratio, lab, weight) in enumerate(zip(centers, label_ratios, centers_lab, weights)):
+        print(f'Cluster {i+1}: RGB={center}, Ratio={ratio}, LAB={lab}, Weight={weight}')
+    # 평균 가중치 출력
+    print(f'Mean Weight: {mean_weight}')
+    
+    # segment_image(image_path)
+
+    
 # 실행
 if __name__ == '__main__':
      main()
