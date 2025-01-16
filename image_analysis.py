@@ -6,9 +6,7 @@ from numpy import arange, log2, polyfit, polyval
 from skimage import color
 from scipy import ndimage
 from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
-from cuml.cluster import KMeans as cuKMeans
-import cupy as cp
+from skimage.color import rgb2lab, rgb2gray
 
 # 이미지 로드 및 초기화
 def load_image(image_path):
@@ -76,46 +74,52 @@ def box_counting_dimension(img_data):
     return fractal_dimension
 
 
-# # k-means 클러스터링 분석
-# def kmeans_color_quantization(img_data, k=5):
-#     reshaped_data = img_data.reshape((-1, 3))
-#     kmeans = KMeans(n_clusters=k, random_state=42)
-#     labels = kmeans.fit_predict(reshaped_data)
-#     centers = kmeans.cluster_centers_
-
-#     silhouette_avg = silhouette_score(reshaped_data, labels)
-#     print(f"Silhouette Score: {silhouette_avg:.2f}")
-
-#     plt.figure(figsize=(8, 8))
-#     plt.pie(
-#         np.bincount(labels) / len(labels),
-#         labels=[f"Cluster {i+1}" for i in range(k)],
-#         colors=[centers[i] / 255 for i in range(k)],
-#         startangle=90,
-#         counterclock=False,
-#     )
-#     plt.title("Color Distribution in Image")
-#     plt.show()
-
-#     return centers, silhouette_avg
-
 def kmeans_color_quantization(img_data, k=5):
     reshaped_data = img_data.reshape((-1, 3))
 
-    # 데이터를 GPU로 전송
-    reshaped_data_gpu = cp.array(reshaped_data)
+    # CPU 기반 K-means 클러스터링
+    kmeans = KMeans(n_clusters=k, random_state=42)
+    kmeans.fit(reshaped_data)
 
-    # GPU 기반 K-means 클러스터링
-    kmeans = cuKMeans(n_clusters=k, random_state=42)
-    kmeans.fit(reshaped_data_gpu)
+    labels = kmeans.labels_
+    centers = kmeans.cluster_centers_
 
-    labels = kmeans.labels_.get()  # GPU에서 CPU로 데이터 복사
-    centers = kmeans.cluster_centers_.get()
+    # LAB 색 공간 변환
+    centers_lab = rgb2lab(centers.reshape(1, -1, 3) / 255.0).reshape(-1, 3)
 
-    # Silhouette Score 계산 (GPU에서는 직접 계산 불가, CPU로 변환 필요)
-    silhouette_avg = silhouette_score(reshaped_data, labels)
-    print(f"Silhouette Score: {silhouette_avg:.2f}")
+    # 색상 대비 계산 (LAB 거리)
+    distances = np.sqrt(np.sum((centers_lab[:, np.newaxis, :] - centers_lab[np.newaxis, :, :]) ** 2, axis=2))
 
+    # 최대 거리로 정규화
+    max_distance = np.max(distances)  # 최대 거리
+    normalized_distances = distances / max_distance  # 정규화
+
+    # 가중치 기반 색상 대비 계산
+    weighted_distances = []
+    for i in range(k):
+        for j in range(i + 1, k):  # i < j로 제한하여 중복 제거
+            spatial_distance = np.linalg.norm(np.array([i, j]))  # 클러스터 위치 간 거리 계산
+            weight = 1 / (1 + spatial_distance)  # 가중치 계산
+            weighted_contrast = weight * normalized_distances[i, j]  # 정규화된 거리와 가중치 적용
+            weighted_distances.append(weighted_contrast)
+
+    # 가중치 평균 계산
+    avg_weighted_distance = np.mean(weighted_distances)
+
+    # 출력
+    print("Normalized LAB Distance Matrix and Weighted Distances:")
+    for i in range(k):
+        print(f"Cluster {i+1}: RGB={tuple(map(int, centers[i]))}")
+    print("\nWeighted LAB Distances (Normalized):")
+    for i in range(k):
+        for j in range(i + 1, k):
+            spatial_distance = np.linalg.norm(np.array([i, j]))
+            weight = 1 / (1 + spatial_distance)
+            weighted_contrast = weight * normalized_distances[i, j]
+            print(f"  Weighted Distance between Cluster {i+1} and Cluster {j+1}: {weighted_contrast:.5f}")
+    print(f"\nAverage Weighted Distance (Normalized): {avg_weighted_distance:.5f}")
+
+    # 파이 차트 시각화
     plt.figure(figsize=(8, 8))
     plt.pie(
         np.bincount(labels) / len(labels),
@@ -124,10 +128,11 @@ def kmeans_color_quantization(img_data, k=5):
         startangle=90,
         counterclock=False,
     )
-    plt.title("Color Distribution in Image (GPU Accelerated)")
+    plt.title("Color Distribution in Image")
     plt.show()
 
-    return centers, silhouette_avg
+    return centers, normalized_distances, avg_weighted_distance
+
 
 
 # 이미지 거칠기 분석
@@ -152,66 +157,90 @@ def surface_roughness(img_data):
 
 
 # 황금비율 분석
-def golden_ratio_analysis(img_data):
-    def mutual_information(image, mask_flat):
-        # 이미지 평탄화 (1차원으로 변환)
-        image_flat = image.flatten()
-        mi = -np.sum(image_flat * np.log2(image_flat + 1e-10))  # 엔트로피 기반 계산
-        return mi
+def mutual_information(image, mask):
+    """
+    Calculate mutual information between the image and the mask.
+    """
+    image_flat = image.flatten()
+    mask_flat = mask.flatten()
+    joint_hist, _, _ = np.histogram2d(image_flat, mask_flat, bins=256, range=[[0, 1], [0, 1]], density=True)
+    joint_prob = joint_hist / np.sum(joint_hist)
 
-    def find_best_split(image, direction='horizontal'):
-        h, w = image.shape
-        max_mi = -np.inf
-        best_split = None
+    marginal_image = np.sum(joint_prob, axis=1)
+    marginal_mask = np.sum(joint_prob, axis=0)
 
-        if direction == 'horizontal':
-            for i in range(1, h):
-                mask = np.zeros((h, w), dtype=int)
-                mask[:i, :] = 1
-                mask_flat = mask.flatten()
-                mi = mutual_information(image, mask_flat)
-                if mi > max_mi:
-                    max_mi = mi
-                    best_split = i
-        elif direction == 'vertical':
-            for i in range(1, w):
-                mask = np.zeros((h, w), dtype=int)
-                mask[:, :i] = 1
-                mask_flat = mask.flatten()
-                mi = mutual_information(image, mask_flat)
-                if mi > max_mi:
-                    max_mi = mi
-                    best_split = i
+    joint_entropy = -np.nansum(joint_prob * np.log2(joint_prob + 1e-10))
+    entropy_image = -np.nansum(marginal_image * np.log2(marginal_image + 1e-10))
+    entropy_mask = -np.nansum(marginal_mask * np.log2(marginal_mask + 1e-10))
 
-        return best_split, max_mi
+    return entropy_image + entropy_mask - joint_entropy
 
-    gray_image = color.rgb2gray(img_data)
 
-    # 수평 및 수직 분할
-    h_split, h_mi = find_best_split(gray_image, direction='horizontal')
-    v_split, v_mi = find_best_split(gray_image, direction='vertical')
+def find_best_split(image, direction='horizontal', step_size=5):
+    """
+    Find the best split position based on maximum mutual information gain.
+    """
+    h, w = image.shape
+    max_mi = -np.inf
+    best_split = None
 
-    # 비율 계산
-    h_ratio = h_split / gray_image.shape[0] if h_split else None
-    v_ratio = v_split / gray_image.shape[1] if v_split else None
+    if direction == 'horizontal':
+        for i in range(step_size, h - step_size, step_size):
+            mask = np.zeros((h, w), dtype=int)
+            mask[:i, :] = 1
+            mi = mutual_information(image, mask)
+            if mi > max_mi:
+                max_mi = mi
+                best_split = i
+    elif direction == 'vertical':
+        for i in range(step_size, w - step_size, step_size):
+            mask = np.zeros((h, w), dtype=int)
+            mask[:, :i] = 1
+            mi = mutual_information(image, mask)
+            if mi > max_mi:
+                max_mi = mi
+                best_split = i
 
-    # 황금비율 비교
+    return best_split, max_mi
+
+
+def golden_ratio_analysis(img_data, step_size=5):
+    """
+    Perform golden ratio analysis using mutual information.
+    """
+    # Convert image to grayscale
+    gray_image = rgb2gray(img_data)
+
+    # Find optimal horizontal and vertical splits
+    h_split, h_mi = find_best_split(gray_image, direction='horizontal', step_size=step_size)
+    v_split, v_mi = find_best_split(gray_image, direction='vertical', step_size=step_size)
+
+    # Calculate proportions
+    h_ratio = h_split / gray_image.shape[0] if h_split else 0.0
+    v_ratio = v_split / gray_image.shape[1] if v_split else 0.0
+
+    # Compare to golden ratio
     golden_ratio = 0.618
-    h_difference = abs(h_ratio - golden_ratio) if h_ratio else None
-    v_difference = abs(v_ratio - golden_ratio) if v_ratio else None
+    h_difference = abs(h_ratio - golden_ratio)
+    v_difference = abs(v_ratio - golden_ratio)
 
     print(f"Horizontal split at {h_split} ({h_ratio:.3f}), Difference from golden ratio: {h_difference:.3f}")
     print(f"Vertical split at {v_split} ({v_ratio:.3f}), Difference from golden ratio: {v_difference:.3f}")
 
-    # 시각화
+    # Visualization
     plt.figure(figsize=(10, 10))
     plt.imshow(gray_image, cmap='gray')
+
     if h_split:
         plt.axhline(h_split, color='red', linestyle='--', label=f'Horizontal: {h_ratio:.3f}')
+        plt.axhline(golden_ratio * gray_image.shape[0], color='green', linestyle='--', label='Golden Ratio Horizontal')
+
     if v_split:
         plt.axvline(v_split, color='blue', linestyle='--', label=f'Vertical: {v_ratio:.3f}')
+        plt.axvline(golden_ratio * gray_image.shape[1], color='orange', linestyle='--', label='Golden Ratio Vertical')
+
     plt.legend()
-    plt.title("Golden Ratio Analysis")
+    plt.title("Golden Ratio Analysis with Mutual Information")
     plt.axis("off")
     plt.show()
 
