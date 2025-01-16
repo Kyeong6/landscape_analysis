@@ -7,6 +7,8 @@ from skimage import color
 from scipy import ndimage
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
+from cuml.cluster import KMeans as cuKMeans
+import cupy as cp
 
 # 이미지 로드 및 초기화
 def load_image(image_path):
@@ -74,13 +76,43 @@ def box_counting_dimension(img_data):
     return fractal_dimension
 
 
-# k-means 클러스터링 분석
+# # k-means 클러스터링 분석
+# def kmeans_color_quantization(img_data, k=5):
+#     reshaped_data = img_data.reshape((-1, 3))
+#     kmeans = KMeans(n_clusters=k, random_state=42)
+#     labels = kmeans.fit_predict(reshaped_data)
+#     centers = kmeans.cluster_centers_
+
+#     silhouette_avg = silhouette_score(reshaped_data, labels)
+#     print(f"Silhouette Score: {silhouette_avg:.2f}")
+
+#     plt.figure(figsize=(8, 8))
+#     plt.pie(
+#         np.bincount(labels) / len(labels),
+#         labels=[f"Cluster {i+1}" for i in range(k)],
+#         colors=[centers[i] / 255 for i in range(k)],
+#         startangle=90,
+#         counterclock=False,
+#     )
+#     plt.title("Color Distribution in Image")
+#     plt.show()
+
+#     return centers, silhouette_avg
+
 def kmeans_color_quantization(img_data, k=5):
     reshaped_data = img_data.reshape((-1, 3))
-    kmeans = KMeans(n_clusters=k, random_state=42)
-    labels = kmeans.fit_predict(reshaped_data)
-    centers = kmeans.cluster_centers_
 
+    # 데이터를 GPU로 전송
+    reshaped_data_gpu = cp.array(reshaped_data)
+
+    # GPU 기반 K-means 클러스터링
+    kmeans = cuKMeans(n_clusters=k, random_state=42)
+    kmeans.fit(reshaped_data_gpu)
+
+    labels = kmeans.labels_.get()  # GPU에서 CPU로 데이터 복사
+    centers = kmeans.cluster_centers_.get()
+
+    # Silhouette Score 계산 (GPU에서는 직접 계산 불가, CPU로 변환 필요)
     silhouette_avg = silhouette_score(reshaped_data, labels)
     print(f"Silhouette Score: {silhouette_avg:.2f}")
 
@@ -92,7 +124,7 @@ def kmeans_color_quantization(img_data, k=5):
         startangle=90,
         counterclock=False,
     )
-    plt.title("Color Distribution in Image")
+    plt.title("Color Distribution in Image (GPU Accelerated)")
     plt.show()
 
     return centers, silhouette_avg
@@ -119,6 +151,71 @@ def surface_roughness(img_data):
     print(f"Standard Deviation of Surface Roughness: {std_roughness:.4f}")
 
 
+# 황금비율 분석
+def golden_ratio_analysis(img_data):
+    def mutual_information(image, mask_flat):
+        # 이미지 평탄화 (1차원으로 변환)
+        image_flat = image.flatten()
+        mi = -np.sum(image_flat * np.log2(image_flat + 1e-10))  # 엔트로피 기반 계산
+        return mi
+
+    def find_best_split(image, direction='horizontal'):
+        h, w = image.shape
+        max_mi = -np.inf
+        best_split = None
+
+        if direction == 'horizontal':
+            for i in range(1, h):
+                mask = np.zeros((h, w), dtype=int)
+                mask[:i, :] = 1
+                mask_flat = mask.flatten()
+                mi = mutual_information(image, mask_flat)
+                if mi > max_mi:
+                    max_mi = mi
+                    best_split = i
+        elif direction == 'vertical':
+            for i in range(1, w):
+                mask = np.zeros((h, w), dtype=int)
+                mask[:, :i] = 1
+                mask_flat = mask.flatten()
+                mi = mutual_information(image, mask_flat)
+                if mi > max_mi:
+                    max_mi = mi
+                    best_split = i
+
+        return best_split, max_mi
+
+    gray_image = color.rgb2gray(img_data)
+
+    # 수평 및 수직 분할
+    h_split, h_mi = find_best_split(gray_image, direction='horizontal')
+    v_split, v_mi = find_best_split(gray_image, direction='vertical')
+
+    # 비율 계산
+    h_ratio = h_split / gray_image.shape[0] if h_split else None
+    v_ratio = v_split / gray_image.shape[1] if v_split else None
+
+    # 황금비율 비교
+    golden_ratio = 0.618
+    h_difference = abs(h_ratio - golden_ratio) if h_ratio else None
+    v_difference = abs(v_ratio - golden_ratio) if v_ratio else None
+
+    print(f"Horizontal split at {h_split} ({h_ratio:.3f}), Difference from golden ratio: {h_difference:.3f}")
+    print(f"Vertical split at {v_split} ({v_ratio:.3f}), Difference from golden ratio: {v_difference:.3f}")
+
+    # 시각화
+    plt.figure(figsize=(10, 10))
+    plt.imshow(gray_image, cmap='gray')
+    if h_split:
+        plt.axhline(h_split, color='red', linestyle='--', label=f'Horizontal: {h_ratio:.3f}')
+    if v_split:
+        plt.axvline(v_split, color='blue', linestyle='--', label=f'Vertical: {v_ratio:.3f}')
+    plt.legend()
+    plt.title("Golden Ratio Analysis")
+    plt.axis("off")
+    plt.show()
+
+
 # 메인 함수
 def main():
     image_path = "./image/scotland.jpg"
@@ -136,6 +233,9 @@ def main():
 
         print("Performing K-means Clustering")
         kmeans_color_quantization(img_data, k=5)
+
+        print("Performing Golden Ratio Analysis")
+        golden_ratio_analysis(img_data)
 
 
 if __name__ == "__main__":
