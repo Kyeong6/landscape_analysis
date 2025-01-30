@@ -1,12 +1,16 @@
-from PIL import Image
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+from PIL import Image
 from numpy import arange, log2, polyfit, polyval
 from skimage import color
 from scipy import ndimage
 from sklearn.cluster import KMeans
 from skimage.color import rgb2lab, rgb2gray
+
+# 분석된 결과 저장 경로
+RESULT_DIR = "after"
 
 # 이미지 로드 및 초기화
 def load_image(image_path):
@@ -19,9 +23,18 @@ def load_image(image_path):
         print(f"Error loading image: {e}")
         return None
 
+# 분석 결과 저장 디렉토리 생성 및 순서대로 파일명 지정
+def get_output_dir(base_path):
+    existing_dirs = sorted(os.listdir(base_path))
+    if not existing_dirs:
+        return os.path.join(base_path, "000001")
+    
+    last_dir = existing_dirs[-1]
+    new_index = int(last_dir) + 1
+    return os.path.join(base_path, f"{new_index:06d}")
 
 # 색상 분석
-def chromo_spectroscopy(img_data):
+def chromo_spectroscopy(img_data, output_path):
     unique_colors, counts = np.unique(
         img_data.reshape(-1, img_data.shape[2]), axis=0, return_counts=True
     )
@@ -29,26 +42,44 @@ def chromo_spectroscopy(img_data):
     unique_colors = unique_colors[sorted_indices]
     counts = counts[sorted_indices]
 
-    # 상위 100 색상 시각화
-    n = min(100, len(unique_colors))
+    # 시각화 저장
     plt.figure(figsize=(20, 10))
     plt.bar(
-        range(n),
-        counts[:n],
-        color=[(uc[0] / 255, uc[1] / 255, uc[2] / 255) for uc in unique_colors[:n]],
+        range(min(100, len(unique_colors))),
+        counts[:100],
+        color=[(uc[0] / 255, uc[1] / 255, uc[2] / 255) for uc in unique_colors[:100]],
     )
-    plt.title(f"Top {n} Colors in Image")
-    plt.xlabel("Color Rank")
-    plt.ylabel("Frequency")
-    plt.show()
+    plt.title("Top Colors in Image")
+    color_path = os.path.join(output_path, "color_spectroscopy.png")
+    plt.savefig(color_path)
+    plt.close()
 
-    return pd.DataFrame(
-        {"RGB Value": [tuple(uc) for uc in unique_colors], "Frequency": counts}
-    )
+    return color_path
+
+# 이미지 거칠기 분석
+def surface_roughness(img_data, output_path):
+    gray_image = color.rgb2gray(img_data)
+    dx = ndimage.sobel(gray_image, 0)
+    dy = ndimage.sobel(gray_image, 1)
+    magnitude = np.hypot(dx, dy)
+
+    mean_roughness = np.mean(magnitude)
+    std_roughness = np.std(magnitude)
+
+    plt.figure(figsize=(8, 6))
+    plt.imshow(magnitude, cmap="gray")
+    plt.colorbar()
+    plt.title("Surface Roughness")
+    plt.axis("off")
+    surface_path = os.path.join(output_path, "surface_roughness.png")
+    plt.savefig(surface_path)
+    plt.close()
+
+    return mean_roughness, std_roughness, surface_path
 
 
 # 프랙탈 차원 계산
-def box_counting_dimension(img_data):
+def box_counting_dimension(img_data, output_path):
     gray_image = color.rgb2gray(img_data)
     sizes = 2 ** arange(8)
     counts = []
@@ -69,203 +100,87 @@ def box_counting_dimension(img_data):
     plt.ylabel("Log(Count)")
     plt.legend()
     plt.title("Box Counting Dimension")
-    plt.show()
+    fractal_path = os.path.join(output_path, "fractal_dimension.png")
+    plt.savefig(fractal_path)
+    plt.close()
 
-    return fractal_dimension
+    return fractal_dimension, fractal_path
 
 
-def kmeans_color_quantization(img_data, k=5):
-    reshaped_data = img_data.reshape((-1, 3))
-
+def kmeans_color_quantization(img_data, output_path, k=5):
     # CPU 기반 K-means 클러스터링
+    reshaped_data = img_data.reshape((-1, 3))
     kmeans = KMeans(n_clusters=k, random_state=42)
     kmeans.fit(reshaped_data)
 
     labels = kmeans.labels_
     centers = kmeans.cluster_centers_
 
-    # LAB 색 공간 변환
+    # LAB 색 공간 변환 및 색상 대비 계산
     centers_lab = rgb2lab(centers.reshape(1, -1, 3) / 255.0).reshape(-1, 3)
-
-    # 색상 대비 계산 (LAB 거리)
     distances = np.sqrt(np.sum((centers_lab[:, np.newaxis, :] - centers_lab[np.newaxis, :, :]) ** 2, axis=2))
 
     # 최대 거리로 정규화
-    max_distance = np.max(distances)  # 최대 거리
-    normalized_distances = distances / max_distance  # 정규화
+    max_distance = np.max(distances) if np.max(distances) > 0 else 1
+    normalized_distances = np.nan_to_num(distances / max_distance)
 
     # 가중치 기반 색상 대비 계산
-    weighted_distances = []
-    for i in range(k):
-        for j in range(i + 1, k):  # i < j로 제한하여 중복 제거
-            spatial_distance = np.linalg.norm(np.array([i, j]))  # 클러스터 위치 간 거리 계산
-            weight = 1 / (1 + spatial_distance)  # 가중치 계산
-            weighted_contrast = weight * normalized_distances[i, j]  # 정규화된 거리와 가중치 적용
-            weighted_distances.append(weighted_contrast)
-
-    # 가중치 평균 계산
-    avg_weighted_distance = np.mean(weighted_distances)
-
-    # 출력
-    print("Normalized LAB Distance Matrix and Weighted Distances:")
-    for i in range(k):
-        print(f"Cluster {i+1}: RGB={tuple(map(int, centers[i]))}")
-    print("\nWeighted LAB Distances (Normalized):")
-    for i in range(k):
-        for j in range(i + 1, k):
-            spatial_distance = np.linalg.norm(np.array([i, j]))
-            weight = 1 / (1 + spatial_distance)
-            weighted_contrast = weight * normalized_distances[i, j]
-            print(f"  Weighted Distance between Cluster {i+1} and Cluster {j+1}: {weighted_contrast:.5f}")
-    print(f"\nAverage Weighted Distance (Normalized): {avg_weighted_distance:.5f}")
+    # 가중 평균 계산
+    weighted_distances = [
+        (1 / (1 + np.linalg.norm(np.array([i, j])))) * normalized_distances[i, j]
+        for i in range(k) for j in range(i + 1, k)
+    ]
+    avg_weighted_distance = np.mean(weighted_distances) if weighted_distances else 0
 
     # 파이 차트 시각화
     plt.figure(figsize=(8, 8))
-    plt.pie(
-        np.bincount(labels) / len(labels),
-        labels=[f"Cluster {i+1}" for i in range(k)],
-        colors=[centers[i] / 255 for i in range(k)],
-        startangle=90,
-        counterclock=False,
-    )
+    cluster_counts = np.bincount(labels, minlength=k) / len(labels)
+    plt.pie(cluster_counts, labels=[f"Cluster {i+1}" for i in range(k)],
+            colors=[centers[i] / 255 for i in range(k)], startangle=90, counterclock=False)
     plt.title("Color Distribution in Image")
-    plt.show()
+    kmeans_path = os.path.join(output_path, "kmeans_pie_chart.png")
+    plt.savefig(kmeans_path)
+    plt.close()
 
-    return centers, normalized_distances, avg_weighted_distance
+    return {
+        "clusters": centers.tolist(),
+        "normalized_distances": normalized_distances.tolist(),
+        "avg_weighted_distance": avg_weighted_distance,
+        "image_path": kmeans_path
+    }
 
-
-
-# 이미지 거칠기 분석
-def surface_roughness(img_data):
-    gray_image = color.rgb2gray(img_data)
-    dx = ndimage.sobel(gray_image, 0)
-    dy = ndimage.sobel(gray_image, 1)
-    magnitude = np.hypot(dx, dy)
-
-    mean_roughness = np.mean(magnitude)
-    std_roughness = np.std(magnitude)
-
-    plt.figure(figsize=(8, 6))
-    plt.imshow(magnitude, cmap="gray")
-    plt.colorbar()
-    plt.title("Surface Roughness")
-    plt.axis("off")
-    plt.show()
-
-    print(f"Mean Surface Roughness: {mean_roughness:.4f}")
-    print(f"Standard Deviation of Surface Roughness: {std_roughness:.4f}")
-
-
-# 황금비율 분석
-def mutual_information(image, mask):
-    """
-    Calculate mutual information between the image and the mask.
-    """
-    image_flat = image.flatten()
-    mask_flat = mask.flatten()
-    joint_hist, _, _ = np.histogram2d(image_flat, mask_flat, bins=256, range=[[0, 1], [0, 1]], density=True)
-    joint_prob = joint_hist / np.sum(joint_hist)
-
-    marginal_image = np.sum(joint_prob, axis=1)
-    marginal_mask = np.sum(joint_prob, axis=0)
-
-    joint_entropy = -np.nansum(joint_prob * np.log2(joint_prob + 1e-10))
-    entropy_image = -np.nansum(marginal_image * np.log2(marginal_image + 1e-10))
-    entropy_mask = -np.nansum(marginal_mask * np.log2(marginal_mask + 1e-10))
-
-    return entropy_image + entropy_mask - joint_entropy
-
-
-def find_best_split(image, direction='horizontal', step_size=5):
-    """
-    Find the best split position based on maximum mutual information gain.
-    """
-    h, w = image.shape
-    max_mi = -np.inf
-    best_split = None
-
-    if direction == 'horizontal':
-        for i in range(step_size, h - step_size, step_size):
-            mask = np.zeros((h, w), dtype=int)
-            mask[:i, :] = 1
-            mi = mutual_information(image, mask)
-            if mi > max_mi:
-                max_mi = mi
-                best_split = i
-    elif direction == 'vertical':
-        for i in range(step_size, w - step_size, step_size):
-            mask = np.zeros((h, w), dtype=int)
-            mask[:, :i] = 1
-            mi = mutual_information(image, mask)
-            if mi > max_mi:
-                max_mi = mi
-                best_split = i
-
-    return best_split, max_mi
-
-
-def golden_ratio_analysis(img_data, step_size=5):
-    """
-    Perform golden ratio analysis using mutual information.
-    """
-    # Convert image to grayscale
-    gray_image = rgb2gray(img_data)
-
-    # Find optimal horizontal and vertical splits
-    h_split, h_mi = find_best_split(gray_image, direction='horizontal', step_size=step_size)
-    v_split, v_mi = find_best_split(gray_image, direction='vertical', step_size=step_size)
-
-    # Calculate proportions
-    h_ratio = h_split / gray_image.shape[0] if h_split else 0.0
-    v_ratio = v_split / gray_image.shape[1] if v_split else 0.0
-
-    # Compare to golden ratio
-    golden_ratio = 0.618
-    h_difference = abs(h_ratio - golden_ratio)
-    v_difference = abs(v_ratio - golden_ratio)
-
-    print(f"Horizontal split at {h_split} ({h_ratio:.3f}), Difference from golden ratio: {h_difference:.3f}")
-    print(f"Vertical split at {v_split} ({v_ratio:.3f}), Difference from golden ratio: {v_difference:.3f}")
-
-    # Visualization
-    plt.figure(figsize=(10, 10))
-    plt.imshow(gray_image, cmap='gray')
-
-    if h_split:
-        plt.axhline(h_split, color='red', linestyle='--', label=f'Horizontal: {h_ratio:.3f}')
-        plt.axhline(golden_ratio * gray_image.shape[0], color='green', linestyle='--', label='Golden Ratio Horizontal')
-
-    if v_split:
-        plt.axvline(v_split, color='blue', linestyle='--', label=f'Vertical: {v_ratio:.3f}')
-        plt.axvline(golden_ratio * gray_image.shape[1], color='orange', linestyle='--', label='Golden Ratio Vertical')
-
-    plt.legend()
-    plt.title("Golden Ratio Analysis with Mutual Information")
-    plt.axis("off")
-    plt.show()
-
-
-# 메인 함수
-def main():
-    image_path = "./image/scotland.jpg"
+# 분석 실행
+def analyze_image(image_path, output_base_path):
     img_data = load_image(image_path)
+    if img_data is None:
+        return None, None
+    
+    # 순서대로 저장할 디렉토리 지정
+    output_path = get_output_dir(output_base_path)
+    os.makedirs(output_path, exist_ok=True)
 
-    if img_data is not None:
-        print("Performing Chromo-spectroscopy")
-        chromo_spectroscopy(img_data)
+    # 분석 실행
+    color_path = chromo_spectroscopy(img_data, output_path)
+    fractal_dimension, fractal_path = box_counting_dimension(img_data, output_path)
+    roughness_mean, roughness_std, surface_path = surface_roughness(img_data, output_path)
+    kmeans_results = kmeans_color_quantization(img_data, output_path, k=5)
 
-        print("Calculating Fractal Dimension")
-        box_counting_dimension(img_data)
+    # 원본 이미지 저장
+    original_path = os.path.join(output_path, "original.jpg")
+    Image.fromarray(img_data).save(original_path)
 
-        print("Analyzing Surface Roughness")
-        surface_roughness(img_data)
-
-        print("Performing K-means Clustering")
-        kmeans_color_quantization(img_data, k=5)
-
-        print("Performing Golden Ratio Analysis")
-        golden_ratio_analysis(img_data)
-
-
-if __name__ == "__main__":
-    main()
+    results = {
+        "fractal_dimension": fractal_dimension,
+        "surface_roughness_mean": roughness_mean,
+        "surface_roughness_std": roughness_std,
+        "kmeans": kmeans_results,
+        "image_paths": {
+            "original": original_path,
+            "color_spectroscopy": color_path,
+            "fractal_dimension": fractal_path,
+            "surface_roughness": surface_path,
+            "kmeans": kmeans_results["image_path"],
+        }
+    }
+    
+    return results, output_path
