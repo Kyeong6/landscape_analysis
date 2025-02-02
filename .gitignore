@@ -190,4 +190,7 @@ image/
 # Credentials
 service_account.json
 
+# Anaysis
+analyzed/
+
 # End of https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks

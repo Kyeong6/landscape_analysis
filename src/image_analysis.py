@@ -9,9 +9,6 @@ from scipy import ndimage
 from sklearn.cluster import KMeans
 from skimage.color import rgb2lab, rgb2gray
 
-# 분석된 결과 저장 경로
-RESULT_DIR = "after"
-
 # 이미지 로드 및 초기화
 def load_image(image_path):
     try:
@@ -25,13 +22,17 @@ def load_image(image_path):
 
 # 분석 결과 저장 디렉토리 생성 및 순서대로 파일명 지정
 def get_output_dir(base_path):
-    existing_dirs = sorted(os.listdir(base_path))
+    if not os.path.exists(base_path):
+        os.makedirs(base_path, exist_ok=True)
+
+    existing_dirs = sorted([d for d in os.listdir(base_path) if d.isdigit()])
+    
     if not existing_dirs:
         return os.path.join(base_path, "000001")
-    
+
     last_dir = existing_dirs[-1]
-    new_index = int(last_dir) + 1
-    return os.path.join(base_path, f"{new_index:06d}")
+    new_index = f"{int(last_dir) + 1:06d}"
+    return os.path.join(base_path, new_index)
 
 # 색상 분석
 def chromo_spectroscopy(img_data, output_path):
@@ -132,10 +133,12 @@ def kmeans_color_quantization(img_data, output_path, k=5):
     ]
     avg_weighted_distance = np.mean(weighted_distances) if weighted_distances else 0
 
+    # 클러스터 점유율 계산
+    cluster_ratios = np.bincount(labels, minlength=k) / len(labels)
+
     # 파이 차트 시각화
     plt.figure(figsize=(8, 8))
-    cluster_counts = np.bincount(labels, minlength=k) / len(labels)
-    plt.pie(cluster_counts, labels=[f"Cluster {i+1}" for i in range(k)],
+    plt.pie(cluster_ratios, labels=[f"Cluster {i+1}" for i in range(k)],
             colors=[centers[i] / 255 for i in range(k)], startangle=90, counterclock=False)
     plt.title("Color Distribution in Image")
     kmeans_path = os.path.join(output_path, "kmeans_pie_chart.png")
@@ -144,6 +147,7 @@ def kmeans_color_quantization(img_data, output_path, k=5):
 
     return {
         "clusters": centers.tolist(),
+        "cluster_ratios": cluster_ratios.tolist(),
         "normalized_distances": normalized_distances.tolist(),
         "avg_weighted_distance": avg_weighted_distance,
         "image_path": kmeans_path
