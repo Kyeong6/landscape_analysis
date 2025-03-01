@@ -42,13 +42,20 @@ def img_crawler(query, count, save_dir):
 
     download_cnt = 0
 
-    # **image_info_list**를 순회하여 이미지 URL 추출
+    # image_info_list를 순회하여 이미지 URL 추출
     for i, image_info in enumerate(image_info_list):
         if download_cnt == count:
             break
         try:
-            # 각 이미지 요소 내 img 태그의 src 속성을 추출
-            save_image = image_info.find_element(By.CSS_SELECTOR, "img").get_attribute('src')
+            # 썸네일 클릭
+            driver.execute_script("arguments[0].click();", image_info)
+
+            # 원본 이미지가 로드될 때까지 잠시 대기
+            time.sleep(2)
+            
+            # XPath 방식으로 원본 이미지 요소 추출 (클래스에 'FyHeAf'가 포함된 이미지)
+            original_img = driver.find_element(By.XPATH, "//img[contains(@class, 'FyHeAf')]")
+            save_image = original_img.get_attribute('src')
         except Exception as e:
             print(f"이미지 {i} 추출 실패: {e}")
             continue
@@ -66,6 +73,8 @@ def img_crawler(query, count, save_dir):
             print(f"다운로드 완료: {image_filepath}")
         except Exception as e:
             print(f"{image_url} 다운로드 실패: {e}")
+            # 실패시 다음 썸네일로 넘어감
+            continue
 
     print('=== 이미지 수집 종료 ===')
     driver.close()
