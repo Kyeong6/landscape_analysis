@@ -1,4 +1,5 @@
 import os
+import shutil
 import pandas as pd
 from src.image_analysis import analyze_image
 from src.crawling import img_crawler
@@ -33,6 +34,14 @@ def get_local_images(base_dir="images"):
                     images.append((continent, image_path))
     return images
 
+def clear_directories():
+    dirs_to_clear = ["images", "results", "analyzed"]
+
+    for directory in dirs_to_clear:
+        if os.path.exists(directory):
+            shutil.rmtree(directory)
+        os.makedirs(directory, exist_ok=True)
+
 def crawl_all_images():
     queries = {
         "africa": "africa landscape real pictures",
@@ -47,9 +56,11 @@ def crawl_all_images():
     for continent, query in queries.items():
         save_dir = os.path.join("images", continent)
         print(f"Crawling for {continent}...")
-        img_crawler(query, count=1, save_dir=save_dir)
+        img_crawler(query, count=100, save_dir=save_dir)
 
 def main():
+    # 모든 결과 디렉토리 초기화
+    clear_directories()
 
     # 이미지 크롤링 실행
     crawl_all_images()
