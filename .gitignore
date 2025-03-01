@@ -185,10 +185,7 @@ poetry.toml
 pyrightconfig.json
 
 ### Image
-image/
-
-# Credentials
-service_account.json
+images/
 
 # Anaysis
 analyzed/

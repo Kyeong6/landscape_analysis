@@ -1,13 +1,12 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-import pandas as pd
 from PIL import Image
 from numpy import arange, log2, polyfit, polyval
 from skimage import color
 from scipy import ndimage
 from sklearn.cluster import KMeans
-from skimage.color import rgb2lab, rgb2gray
+from skimage.color import rgb2lab
 
 # 이미지 로드 및 초기화
 def load_image(image_path):
@@ -28,10 +27,10 @@ def get_output_dir(base_path):
     existing_dirs = sorted([d for d in os.listdir(base_path) if d.isdigit()])
     
     if not existing_dirs:
-        return os.path.join(base_path, "000001")
+        return os.path.join(base_path, "001")
 
     last_dir = existing_dirs[-1]
-    new_index = f"{int(last_dir) + 1:06d}"
+    new_index = f"{int(last_dir) + 1:03d}"
     return os.path.join(base_path, new_index)
 
 # 색상 분석
@@ -187,4 +186,4 @@ def analyze_image(image_path, output_base_path):
         }
     }
     
-    return results, output_path
+    return results
