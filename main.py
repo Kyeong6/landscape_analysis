@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 from src.image_analysis import analyze_image
+from src.crawling import img_crawler
 
 def save_results_to_csv(results, csv_filename="analysis_results.csv"):
     headers = [
@@ -32,7 +33,27 @@ def get_local_images(base_dir="images"):
                     images.append((continent, image_path))
     return images
 
+def crawl_all_images():
+    queries = {
+        "africa": "africa landscape real pictures",
+        "antarctica": "antarctica landscape real pictures",
+        "asia": "asia landscape real pictures",
+        "europe": "europe landscape real pictures",
+        "north_america": "north america landscape real pictures",
+        "oceania": "oceania landscape real pictures",
+        "south_america": "south america landscape real pictures"
+    }
+
+    for continent, query in queries.items():
+        save_dir = os.path.join("images", continent)
+        print(f"Crawling for {continent}...")
+        img_crawler(query, count=1, save_dir=save_dir)
+
 def main():
+
+    # 이미지 크롤링 실행
+    crawl_all_images()
+
     # images 디렉토리에서 각 대륙별 이미지 목록 가져오기
     images = get_local_images("images")
     if not images:
