@@ -2,17 +2,18 @@ import os
 import time
 import urllib.request
 from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 
 # 이미지 크롤러 객체 정의
 class ImageCrawler:
-    def __init__(self, base_dir="images", count=3):
+    def __init__(self, base_dir="images", count=3, max_retries=2):
         self.base_dir = base_dir
         self.count = count
         self.driver = None
+        self.max_retries = max_retries
         os.makedirs(self.base_dir, exist_ok=True)
 
     # Chrome Driver 실행
@@ -35,20 +36,32 @@ class ImageCrawler:
         self.driver.get(search_url)
 
         # 이미지 확보(무한 스크롤)
-        max_attempts = 20
+        max_attempts = 30
         attempts = 0
         while attempts < max_attempts:
-            image_elements = self.driver.find_elements(By.CSS_SELECTOR, ".H8Rx8c")
-            if len(image_elements) >= self.count * 2:
+            try:
+                image_elements = self.driver.find_elements(By.CSS_SELECTOR, ".H8Rx8c")
+                if len(image_elements) >= self.count * 2:
+                    break
+                # '검색 결과 더보기' 버튼 확인 및 클릭
+                try:
+                    more_button = self.driver.find_element(By.XPATH, "//a[@jsaction='ix6FRc']")
+                    more_button.click()
+                    time.sleep(2)
+                except NoSuchElementException:
+                    pass
+
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(1)
+                attempts += 1
+            except Exception as e:
+                print(f"스크롤 및 더보기 버튼 처리 중 오류 발생: {e}")
                 break
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(1)
-            attempts += 1
 
         download_cnt = 0
         i = 0
 
-        print(f"=== 이미지 수집 시작 ===")
+        print(f"=== 이미지 수집 시작: {continent} ===")
 
         # 썸네일 클릭 후 원본 이미지 다운로드
         while download_cnt < self.count and i < len(image_elements):
@@ -64,13 +77,19 @@ class ImageCrawler:
                 # 파일 저장
                 image_filename = f"{download_cnt+1:04d}.jpg"
                 image_path = os.path.join(save_dir, image_filename)
-                
-                try:
-                    urllib.request.urlretrieve(image_url, image_path)
-                    print(f"다운로드 완료: {image_path}")
+
+                # 이미지 다운로드 시도
+                success = False
+                for attemp in range(self.max_retries):
+                    try:
+                        urllib.request.urlretrieve(image_url, image_path)
+                        print(f"다운로드 완료: {image_path}")
+                        success = True
+                        break
+                    except Exception as e:
+                        print(f"{image_url} 다운로드 실패 (시도 {attemp+1}/{self.max_retries}): {e}")
+                if success:
                     download_cnt += 1
-                except Exception as e:
-                    print(f"{image_url} 다운로드 실패: {e}")
 
             except Exception as e:
                 print(f"썸네일 {i} 클릭 또는 원본 이미지 추출 실패: {e}")
@@ -78,5 +97,5 @@ class ImageCrawler:
             # 실패시 다음 썸네일로 이동
             i += 1
         
-        print('=== 이미지 수집 종료 ===')
+        print(f'=== 이미지 수집 종료 / 총 다운로드: {download_cnt}/{self.count} ===')
         self.driver.quit()

@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 import pandas as pd
 from src.image_analysis import ImageAnalyzer
 from src.crawling import ImageCrawler
@@ -14,6 +15,11 @@ class ImageProcessor:
         self.images_dir = "images"
         self.analyzed_dir = "analyzed"
 
+        # 수행 시간 저장
+        self.crawling_time = 0
+        self.analysis_time = 0
+        self.total_time = 0
+
     # 실행 전 디렉토리 데이터 초기화
     def clear_directory(self):
         for directory in [self.images_dir, self.results_dir, self.analyzed_dir]:
@@ -23,6 +29,8 @@ class ImageProcessor:
 
     # 크롤링 수행
     def crawl_images(self):
+        start_time = time.time()
+
         queries = {
             "africa": "africa landscape real pictures",
             "antarctica": "antarctica landscape real pictures",
@@ -37,6 +45,10 @@ class ImageProcessor:
             print(f"Crawling for {continent}...")
             self.image_crawler.fetch_images(query, continent)
 
+        end_time = time.time()
+        self.crawling_time = end_time - start_time
+
+
     # 크롤링된 이미지 가져오기
     def get_local_images(self):
         images = []
@@ -47,7 +59,12 @@ class ImageProcessor:
         for continent in os.listdir(self.images_dir):
             continent_dir = os.path.join(self.images_dir, continent)
             if os.path.isdir(continent_dir):
-                for filename in os.listdir(continent_dir):
+                # 파일명을 숫자 기준으로 정렬
+                sorted_files = sorted(
+                    os.listdir(continent_dir),
+                    key=lambda x: int(os.path.splitext(x)[0]) if x.split('.')[0].isdigit() else x
+                )
+                for filename in sorted_files:
                     if filename.lower().endswith((".jpg", ".jpeg", ".png")):
                         image_path = os.path.join(continent_dir, filename)
                         images.append((continent, image_path))
@@ -61,6 +78,7 @@ class ImageProcessor:
             print("분석할 이미지 없음")
             return
         
+        start_time = time.time()
         analysis_rows = []
         continent_results = {}
 
@@ -95,8 +113,11 @@ class ImageProcessor:
 
         # 분석 결과 저장
         self.save_synthesis_results(analysis_rows)
-
+        
         print(f"분석 완료 /  총 분석 이미지 수: {len(analysis_rows)}")
+        
+        end_time = time.time()
+        self.analysis_time = end_time - start_time
 
     # 분석 결과 저장
     def save_results(self, results, csv_filename):
@@ -106,7 +127,10 @@ class ImageProcessor:
             "Cluster 1 Ratio", "Cluster 2 Ratio", "Cluster 3 Ratio", "Cluster 4 Ratio", "Cluster 5 Ratio"
         ]
 
-        df = pd.DataFrame(results, columns=headers)
+        # 이미지명으로 정렬
+        results_sorted = sorted(results, key=lambda row: int(os.path.splitext(row[1])[0]) if row[1].split('.')[0].isdigit() else row[1])
+
+        df = pd.DataFrame(results_sorted, columns=headers)
 
         if not os.path.exists(csv_filename):
             df.to_csv(csv_filename, index=False, mode="w")
@@ -119,24 +143,51 @@ class ImageProcessor:
             "africa", "antarctica", "asia", "europe",
             "north_america", "oceania", "south_america"
         ]
-        
-        # 대륙별 정렬
-        analysis_rows_sorted = sorted(
-            analysis_rows,
-            key=lambda row: continent_order.index(row[0].lower()) if row[0].lower() in continent_order else 999
-        )
+        headers = [
+            "Continent", "Image Name", "Fractal Dimension", "Surface Roughness Mean",
+            "Surface Roughness Std", "KMeans Avg Weighted Distance",
+            "Cluster 1 Ratio", "Cluster 2 Ratio", "Cluster 3 Ratio", "Cluster 4 Ratio", "Cluster 5 Ratio"
+        ]
 
-        # synthesis.csv 저장
+        df = pd.DataFrame(analysis_rows, columns=headers)
+
+        # 대륙별 정렬 및 이미지명 정렬
+        df["Continent_Order"] = df["Continent"].apply(lambda x: continent_order.index(x.lower()) if x.lower() in continent_order else 999)
+
+        # 파일명이 비어 있는 경우 예외 처리
+        def extract_image_num(filename):
+            try:
+                return int(os.path.splitext(filename)[0])  # "0001.jpg" -> 1
+            except ValueError:
+                print(f"Warning: 잘못된 파일명 형식 - {filename}")
+                return 9999  # 오류 발생 시 가장 마지막에 정렬
+
+        df["Image_Num"] = df["Image Name"].apply(extract_image_num)
+
+        # 정렬 수행 (대륙 우선 → 이미지 번호 순서)
+        df = df.sort_values(by=["Continent_Order", "Image_Num"]).drop(columns=["Continent_Order", "Image_Num"])
+
+        # CSV 저장
         synthesis_csv = os.path.join(self.results_dir, "synthesis.csv")
-        self.save_results(analysis_rows_sorted, synthesis_csv)
+        df.to_csv(synthesis_csv, index=False)
 
     # 전체 실행 프로세스
     def run_process(self):
+        start_time = time.time()
+
         self.clear_directory()
         self.crawl_images()
         self.analyze_images()
 
+        end_time = time.time()
+        self.total_time = end_time - start_time
+
+        # 수행 시간 출력
+        print(f"[Crawling Time]     {self.crawling_time:.2f} 초")
+        print(f"[Analysis Time]     {self.analysis_time:.2f} 초")
+        print(f"[Image Process]     {self.total_time:.2f} 초")
+
 
 if __name__ == "__main__":
-    processor = ImageProcessor(image_count=1)
+    processor = ImageProcessor(image_count=100)
     processor.run_process()
