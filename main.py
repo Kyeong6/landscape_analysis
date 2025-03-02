@@ -2,6 +2,8 @@ import os
 import shutil
 import time
 import pandas as pd
+import asyncio
+from multiprocessing import Pool, cpu_count
 from src.image_analysis import ImageAnalyzer
 from src.crawling import ImageCrawler
 
@@ -14,24 +16,16 @@ class ImageProcessor:
         self.results_dir = "results"
         self.images_dir = "images"
         self.analyzed_dir = "analyzed"
+        # 크롤링이 끝난 대륙의 이미지 저장할 큐
+        self.queue = asyncio.Queue()
 
         # 수행 시간 저장
         self.crawling_time = 0
         self.analysis_time = 0
         self.total_time = 0
 
-    # 실행 전 디렉토리 데이터 초기화
-    def clear_directory(self):
-        for directory in [self.images_dir, self.results_dir, self.analyzed_dir]:
-            if os.path.exists(directory):
-                shutil.rmtree(directory)
-            os.makedirs(directory, exist_ok=True)
-
-    # 크롤링 수행
-    def crawl_images(self):
-        start_time = time.time()
-
-        queries = {
+        # 크롤러 실행을 위한 비동기 세팅
+        self.continents = {
             "africa": "africa landscape real pictures",
             "antarctica": "antarctica landscape real pictures",
             "asia": "asia landscape real pictures",
@@ -41,22 +35,40 @@ class ImageProcessor:
             "south_america": "south america landscape real pictures"
         }
 
-        for continent, query in queries.items():
-            print(f"Crawling for {continent}...")
-            self.image_crawler.fetch_images(query, continent)
+    # 실행 전 디렉토리 데이터 초기화
+    def clear_directory(self):
+        for directory in [self.images_dir, self.results_dir, self.analyzed_dir]:
+            if os.path.exists(directory):
+                shutil.rmtree(directory)
+            os.makedirs(directory, exist_ok=True)
 
+    # 비동기 기반 크롤링 정의
+    async def crawl_continent(self, continent, query):
+        print(f"Crawling started for {continent}...")
+        crawler = ImageCrawler(count=self.image_count)
+        await asyncio.to_thread(crawler.fetch_images, query, continent)
+        
+        # 크롤링 완료된 대륙을 큐에 추가
+        await self.queue.put(continent)
+
+    # 크롤링 수행
+    async def crawl_images(self):
+        start_time = time.time()
+        tasks = [self.crawl_continent(continent, query) for continent, query in self.continents.items()]
+        await asyncio.gather(*tasks)
         end_time = time.time()
         self.crawling_time = end_time - start_time
 
-
     # 크롤링된 이미지 가져오기
-    def get_local_images(self):
+    def get_local_images(self, selected_continents=None):
         images = []
         if not os.path.exists(self.images_dir):
             print(f"{self.images_dir} 디렉토리가 존재하지 않음")
             return images
         
         for continent in os.listdir(self.images_dir):
+            if selected_continents and continent not in selected_continents:
+                continue
             continent_dir = os.path.join(self.images_dir, continent)
             if os.path.isdir(continent_dir):
                 # 파일명을 숫자 기준으로 정렬
@@ -70,54 +82,56 @@ class ImageProcessor:
                         images.append((continent, image_path))
         return images
     
-
-    # 이미지 분석 실행
-    def analyze_images(self):
-        images = self.get_local_images()
+    # 멀티 프로세싱 기반 이미지 분석 정의
+    def analyze_continent(self, continent):
+        images = self.get_local_images([continent])
         if not images:
-            print("분석할 이미지 없음")
-            return
+            print(f"{continent}: 분석할 이미지 없음")
+            return []
         
-        start_time = time.time()
         analysis_rows = []
-        continent_results = {}
 
-        for continent, image_path in images:
+        for _, image_path in images:
             print(f"Analyzing: {image_path}")
-
-            # 분석 실행
             results = self.image_analyzer.run_analysis(image_path, continent)
             if results:
                 image_name = os.path.basename(image_path)
-                fractal_dimension = results.get("fractal_dimension", "N/A")
-                roughness_mean = results.get("surface_roughness_mean", "N/A")
-                roughness_std = results.get("surface_roughness_std", "N/A")
-                kmeans = results.get("kmeans", {})
-                avg_weighted_distance = kmeans.get("avg_weighted_distance", "N/A")
-                cluster_ratios = kmeans.get("cluster_ratios", ["N/A"] * 5)
-                cluster_ratios = cluster_ratios[:5] + ["N/A"] * (5 - len(cluster_ratios))
-
                 row = [
-                    continent, image_name, fractal_dimension, roughness_mean,
-                    roughness_std, avg_weighted_distance, *cluster_ratios
+                    continent, image_name, 
+                    results.get("fractal_dimension", "N/A"),
+                    results.get("surface_roughness_mean", "N/A"),
+                    results.get("surface_roughness_std", "N/A"),
+                    results.get("kmeans", {}).get("avg_weighted_distance", "N/A"),
+                    *results.get("kmeans", {}).get("cluster_ratios", ["N/A"] * 5)
                 ]
                 analysis_rows.append(row)
 
-                if continent not in continent_results:
-                    continent_results[continent] = []
-                continent_results[continent].append(row)
-
-        for continent, rows in continent_results.items():
+        if analysis_rows:
             csv_filename = os.path.join(self.results_dir, f"{continent}.csv")
-            self.save_results(rows, csv_filename)
+            self.save_results(analysis_rows, csv_filename)
 
-        # 분석 결과 저장
+        print(f"Analysis completed for {continent}")
+        return analysis_rows
+
+    # 이미지 분석 실행
+    def analyze_images(self, selected_continents=None):
+        
+        start_time = time.time()
+
+        # 큐에서 모든 크롤링 완료된 대륙 가져오기
+        continents_to_analyze = []
+        while not self.queue.empty():
+            continents_to_analyze.append(self.queue.get_nowait())
+        
+        # 병렬 분석 ㅣㅅㄹ행
+        with Pool(processes=min(len(self.continents), cpu_count())) as pool:
+            results = pool.map(self.analyze_continent, continents_to_analyze)
+
+        analysis_rows = [row for result in results if result for row in result]
         self.save_synthesis_results(analysis_rows)
-        
+
+        self.analysis_time = time.time() - start_time
         print(f"분석 완료 /  총 분석 이미지 수: {len(analysis_rows)}")
-        
-        end_time = time.time()
-        self.analysis_time = end_time - start_time
 
     # 분석 결과 저장
     def save_results(self, results, csv_filename):
@@ -176,7 +190,7 @@ class ImageProcessor:
         start_time = time.time()
 
         self.clear_directory()
-        self.crawl_images()
+        asyncio.run(self.crawl_images())
         self.analyze_images()
 
         end_time = time.time()
