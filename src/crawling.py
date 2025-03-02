@@ -7,74 +7,76 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
-def img_crawler(query, count, save_dir):
+# 이미지 크롤러 객체 정의
+class ImageCrawler:
+    def __init__(self, base_dir="images", count=3):
+        self.base_dir = base_dir
+        self.count = count
+        self.driver = None
+        os.makedirs(self.base_dir, exist_ok=True)
 
-    # 디렉토리 존재 확인
-    os.makedirs(save_dir, exist_ok=True)
-    
-    # Chrome Webdriver 생성
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
+    # Chrome Driver 실행
+    def setup_driver(self):
+        self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
 
-    # 구글 이미지 검색 결과 페이지 이동
-    search_url = "https://www.google.com/search?tbm=isch&q=" + query
-    driver.get(search_url)
-    
+    # Chrome Driver 종료
+    def close_driver(self):
+        if self.driver:
+            self.driver.quit()
 
-    # 무한 스크롤 처리: count 이상 이미지가 로드될 때까지 스크롤
-    max_attempts = 20
-    attempts = 0
-    while attempts < max_attempts:
-        image_elements = driver.find_elements(By.CSS_SELECTOR, ".H8Rx8c")
-        if len(image_elements) >= count * 2:
-            break
-        driver.find_element(By.CSS_SELECTOR, "body").send_keys(Keys.END)
-        time.sleep(1) 
-        attempts += 1
+    def fetch_images(self, query, continent):
+        # 대륙 별 디렉토리 설정
+        save_dir = os.path.join(self.base_dir, continent)
+        os.makedirs(save_dir, exist_ok=True)
 
-    # 구글 이미지 결과 페이지 내에서 이미지 정보 포함하는 요소 선택
-    image_info_list = driver.find_elements(By.CSS_SELECTOR, ".H8Rx8c")
+        # Chrome Driver 객체
+        self.setup_driver()
+        search_url = f"https://www.google.com/search?tbm=isch&q={query}"
+        self.driver.get(search_url)
 
-    print(f"=== 이미지 수집 시작 ===")
+        # 이미지 확보(무한 스크롤)
+        max_attempts = 20
+        attempts = 0
+        while attempts < max_attempts:
+            image_elements = self.driver.find_elements(By.CSS_SELECTOR, ".H8Rx8c")
+            if len(image_elements) >= self.count * 2:
+                break
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1)
+            attempts += 1
 
-    image_and_name_list = []
-    download_cnt = 0
-    i = 0
+        download_cnt = 0
+        i = 0
 
-    # count만큼 다운로드 될 때까지 반복
-    while download_cnt < count and i < len(image_info_list):
-        image_info = image_info_list[i]
-        # 다음 썸네일로 이동
-        i += 1
-        try:
-            # 썸네일 클릭
-            driver.execute_script("arguments[0].click();", image_info)
+        print(f"=== 이미지 수집 시작 ===")
 
-            # 원본 이미지가 로드될 때까지 잠시 대기
-            time.sleep(2)
-            
-            # XPath 방식으로 원본 이미지 요소 추출
-            original_img = driver.find_element(By.XPATH, "//img[contains(@class, 'FyHeAf')]")
-            save_image = original_img.get_attribute('src')
-            
-            # 저장할 파일명 생성
-            image_filename = f"{download_cnt+1:04d}.jpg"
-            image_filepath = os.path.join(save_dir, image_filename)
-
-            # 원본 이미지 다운로드 시도
+        # 썸네일 클릭 후 원본 이미지 다운로드
+        while download_cnt < self.count and i < len(image_elements):
             try:
-                urllib.request.urlretrieve(save_image, image_filepath)
-                print(f"다운로드 완료: {image_filepath}")
-                image_and_name_list.append((save_image, image_filepath))
-                download_cnt += 1  # 성공 시에만 카운트 증가
-            except Exception as e:
-                print(f"{save_image} 다운로드 실패: {e}")
-                # 실패 시 다음 썸네일 시도
-                continue
-    
-        except Exception as e:
-            print(f"썸네일 {i} 클릭 또는 원본 추출 실패: {e}")
-            # 다음 썸네일 시도
-            continue  
+                # 썸네일 클릭
+                self.driver.execute_script("arguments[0].click();", image_elements[i])
+                time.sleep(2)
 
-    print('=== 이미지 수집 종료 ===')
-    driver.close()
+                # 원본 이미지 찾기 (XPath 방식)
+                original_img = self.driver.find_element(By.XPATH, "//img[contains(@class, 'FyHeAf')]")
+                image_url = original_img.get_attribute("src")
+
+                # 파일 저장
+                image_filename = f"{download_cnt+1:04d}.jpg"
+                image_path = os.path.join(save_dir, image_filename)
+                
+                try:
+                    urllib.request.urlretrieve(image_url, image_path)
+                    print(f"다운로드 완료: {image_path}")
+                    download_cnt += 1
+                except Exception as e:
+                    print(f"{image_url} 다운로드 실패: {e}")
+
+            except Exception as e:
+                print(f"썸네일 {i} 클릭 또는 원본 이미지 추출 실패: {e}")
+
+            # 실패시 다음 썸네일로 이동
+            i += 1
+        
+        print('=== 이미지 수집 종료 ===')
+        self.driver.quit()
