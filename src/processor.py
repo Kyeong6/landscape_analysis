@@ -43,18 +43,26 @@ class ImageProcessor:
             os.makedirs(directory, exist_ok=True)
 
     # 비동기 기반 크롤링 정의
-    async def crawl_continent(self, continent, query):
-        print(f"Crawling started for {continent}...")
-        crawler = ImageCrawler(count=self.image_count)
-        await asyncio.to_thread(crawler.fetch_images, query, continent)
-        
-        # 크롤링 완료된 대륙을 큐에 추가
-        await self.queue.put(continent)
+    async def crawl_continent(self, continent, query, semaphore):
+        async with semaphore:
+            print(f"Crawling started for {continent}...")
+            crawler = ImageCrawler(count=self.image_count)
+
+            await asyncio.to_thread(crawler.fetch_images, query, continent)
+            
+            # 크롤링 완료된 대륙을 큐에 추가
+            await self.queue.put(continent)
 
     # 크롤링 수행
     async def crawl_images(self):
         start_time = time.time()
-        tasks = [self.crawl_continent(continent, query) for continent, query in self.continents.items()]
+
+        # 최대 크롤링 제한
+        semaphore = asyncio.Semaphore(3)
+
+        tasks = [self.crawl_continent(continent, query, semaphore) for continent, query in self.continents.items()]
+        
+        # 모든 크롤링 작업이 끝날 때까지 대기
         await asyncio.gather(*tasks)
         end_time = time.time()
         self.crawling_time = end_time - start_time

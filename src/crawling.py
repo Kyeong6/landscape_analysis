@@ -5,7 +5,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import NoSuchElementException
-from webdriver_manager.chrome import ChromeDriverManager
+from core.config import settings
 
 # 이미지 크롤러 객체 정의
 class ImageCrawler:
@@ -18,7 +18,8 @@ class ImageCrawler:
 
     # Chrome Driver 실행
     def setup_driver(self):
-        self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
+        service = Service(settings.CHROMEDRIVER_PATH)
+        self.driver = webdriver.Chrome(service=service)
 
     # Chrome Driver 종료
     def close_driver(self):
