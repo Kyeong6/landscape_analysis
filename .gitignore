@@ -193,6 +193,9 @@ analyzed/
 # results
 results/
 
+# collect
+collect/
+
 # pdf
 project_setting.pdf
 
