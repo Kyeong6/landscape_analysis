@@ -104,13 +104,14 @@ class ImageProcessor:
             results = self.image_analyzer.run_analysis(image_path, continent)
             if results:
                 image_name = os.path.basename(image_path)
+                kmeans_data = results.get("kmeans", {})
                 row = [
                     continent, image_name, 
                     results.get("fractal_dimension", "N/A"),
                     results.get("surface_roughness_mean", "N/A"),
                     results.get("surface_roughness_std", "N/A"),
-                    results.get("kmeans", {}).get("avg_weighted_distance", "N/A"),
-                    *results.get("kmeans", {}).get("cluster_ratios", ["N/A"] * 5)
+                    kmeans_data.get("contrast_score", 0),
+                    *kmeans_data.get("cluster_ratios", ["N/A"] * 5)
                 ]
                 analysis_rows.append(row)
 
@@ -148,9 +149,19 @@ class ImageProcessor:
             "Surface Roughness Std", "KMeans Avg Weighted Distance",
             "Cluster 1 Ratio", "Cluster 2 Ratio", "Cluster 3 Ratio", "Cluster 4 Ratio", "Cluster 5 Ratio"
         ]
+        # 소수점 4자리까지 저장
+        def round_float(val):
+            if isinstance(val, float):
+                return round(val, 4)
+            return val
+
+        # 소수점 4자리로 변환
+        results_rounded = [
+            [round_float(value) for value in row] for row in results
+        ]
 
         # 이미지명으로 정렬
-        results_sorted = sorted(results, key=lambda row: int(os.path.splitext(row[1])[0]) if row[1].split('.')[0].isdigit() else row[1])
+        results_sorted = sorted(results_rounded, key=lambda row: int(os.path.splitext(row[1])[0]) if row[1].split('.')[0].isdigit() else row[1])
 
         df = pd.DataFrame(results_sorted, columns=headers)
 
@@ -171,7 +182,18 @@ class ImageProcessor:
             "Cluster 1 Ratio", "Cluster 2 Ratio", "Cluster 3 Ratio", "Cluster 4 Ratio", "Cluster 5 Ratio"
         ]
 
-        df = pd.DataFrame(analysis_rows, columns=headers)
+        # 소수점 4자리까지만 반올림하는 함수
+        def round_float(val):
+            if isinstance(val, float):
+                return round(val, 4)
+            return val
+        
+        # 소수점 4자리 변환
+        analysis_rows_rounded = [
+        [round_float(value) for value in row] for row in analysis_rows
+        ]
+
+        df = pd.DataFrame(analysis_rows_rounded, columns=headers)
 
         # 대륙별 정렬 및 이미지명 정렬
         df["Continent_Order"] = df["Continent"].apply(lambda x: continent_order.index(x.lower()) if x.lower() in continent_order else 999)

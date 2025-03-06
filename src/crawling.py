@@ -61,6 +61,8 @@ class ImageCrawler:
 
         download_cnt = 0
         i = 0
+        # 중복 필터링
+        seen_urls = set()
 
         print(f"=== 이미지 수집 시작: {continent} ===")
 
@@ -72,8 +74,17 @@ class ImageCrawler:
                 time.sleep(2)
 
                 # 원본 이미지 찾기 (XPath 방식)
-                original_img = self.driver.find_element(By.XPATH, "//img[contains(@class, 'FyHeAf')]")
+                original_img = self.driver.find_element(By.XPATH, "//img[contains(@class, 'iPVvYb') or contains(@class, 'n3VNCb')]")
                 image_url = original_img.get_attribute("src")
+
+                # 중복 이미지 방지(URL 확인)
+                if image_url in seen_urls:
+                    print(f"[SKIP] 중복 이미지 발견: {image_url}")
+                    i += 1
+                    continue
+                
+                # 중복 확인을 위해 저장
+                seen_urls.add(image_url)
 
                 # 파일 저장
                 image_filename = f"{download_cnt+1:04d}.jpg"
